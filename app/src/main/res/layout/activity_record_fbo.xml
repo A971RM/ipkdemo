@@ -54,6 +54,7 @@
         android:layout_alignParentLeft="true"
         android:layout_below="@+id/fboRecord_button"
         android:text="@string/glesVersionLabel"
+        android:visibility="invisible"
         android:textAppearance="?android:attr/textAppearanceLarge" />
 
     <TextView
@@ -64,6 +65,7 @@
         android:layout_alignBottom="@+id/glesVersionLabel_text"
         android:layout_toRightOf="@+id/glesVersionLabel_text"
         android:text="@string/glesVersionValue"
+        android:visibility="invisible"
         android:textAppearance="?android:attr/textAppearanceLarge" />
 
     <TextView
@@ -73,6 +75,7 @@
         android:layout_alignParentLeft="true"
         android:layout_below="@+id/glesVersionLabel_text"
         android:text="@string/frameRateLabel"
+        android:visibility="invisible"
         android:textAppearance="?android:attr/textAppearanceLarge" />
 
     <TextView
@@ -83,12 +86,14 @@
         android:layout_alignBottom="@+id/frameRateLabel_text"
         android:layout_toRightOf="@+id/frameRateLabel_text"
         android:text="---"
+        android:visibility="invisible"
         android:textAppearance="?android:attr/textAppearanceLarge" />
 
     <RadioGroup
         android:layout_width="fill_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
+        android:visibility="invisible"
         android:layout_below="@+id/frameRateLabel_text">
 
         <RadioButton
