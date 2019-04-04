@@ -856,8 +856,8 @@ public class RecordFBOActivity extends Activity implements SurfaceHolder.Callbac
             // explode if given "strange" dimensions, e.g. a width that is not a multiple
             // of 16.  We can box it as needed to preserve dimensions.
             final int BIT_RATE = 4000000;   // 4Mbps
-            final int VIDEO_WIDTH = 1280;
-            final int VIDEO_HEIGHT = 720;
+            final int VIDEO_WIDTH = 1080;
+            final int VIDEO_HEIGHT = 1920;
             int windowWidth = mWindowSurface.getWidth();
             int windowHeight = mWindowSurface.getHeight();
             float windowAspect = (float) windowHeight / (float) windowWidth;
