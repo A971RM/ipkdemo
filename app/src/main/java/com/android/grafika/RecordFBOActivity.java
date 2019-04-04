@@ -16,10 +16,15 @@
 
 package com.android.grafika;
 
+import android.content.Context;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.opengl.GLES20;
 import android.opengl.GLES30;
+import android.opengl.GLUtils;
 import android.opengl.Matrix;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
@@ -43,10 +48,16 @@ import com.android.grafika.gles.GlUtil;
 import com.android.grafika.gles.Sprite2d;
 import com.android.grafika.gles.Texture2dProgram;
 import com.android.grafika.gles.WindowSurface;
+import com.openglesbook.common.ESShader;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.lang.ref.WeakReference;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.FloatBuffer;
+import java.nio.ShortBuffer;
 
 /**
  * Demonstrates efficient display + recording of OpenGL rendering using an FBO.  This
@@ -156,10 +167,12 @@ public class RecordFBOActivity extends Activity implements SurfaceHolder.Callbac
     public void surfaceCreated(SurfaceHolder holder) {
         Log.d(TAG, "surfaceCreated holder=" + holder);
 
-        File outputFile = new File(getFilesDir(), "fbo-gl-recording.mp4");
+        File wallpaperDirectory = new File(Environment.getExternalStorageDirectory(), "ipkdemo");
+        wallpaperDirectory.mkdirs();
+        File outputFile = new File(wallpaperDirectory, "fbo-gl-recording.mp4");
         SurfaceView sv = (SurfaceView) findViewById(R.id.fboActivity_surfaceView);
         mRenderThread = new RenderThread(sv.getHolder(), new ActivityHandler(this), outputFile,
-                MiscUtils.getDisplayRefreshNsec(this));
+                MiscUtils.getDisplayRefreshNsec(this), this);
         mRenderThread.setName("RecordFBO GL render");
         mRenderThread.start();
         mRenderThread.waitUntilReady();
@@ -463,7 +476,7 @@ public class RecordFBOActivity extends Activity implements SurfaceHolder.Callbac
          * Pass in the SurfaceView's SurfaceHolder.  Note the Surface may not yet exist.
          */
         public RenderThread(SurfaceHolder holder, ActivityHandler ahandler, File outputFile,
-                long refreshPeriodNs) {
+                long refreshPeriodNs, Context context) {
             mSurfaceHolder = holder;
             mActivityHandler = ahandler;
             mOutputFile = outputFile;
@@ -481,6 +494,13 @@ public class RecordFBOActivity extends Activity implements SurfaceHolder.Callbac
                 mEdges[i] = new Sprite2d(mRectDrawable);
             }
             mRecordRect = new Sprite2d(mRectDrawable);
+            mContext = context;
+            mVertices = ByteBuffer.allocateDirect ( mVerticesData.length * 4 )
+                    .order ( ByteOrder.nativeOrder() ).asFloatBuffer();
+            mVertices.put ( mVerticesData ).position ( 0 );
+            mIndices = ByteBuffer.allocateDirect ( mIndicesData.length * 2 )
+                    .order ( ByteOrder.nativeOrder() ).asShortBuffer();
+            mIndices.put ( mIndicesData ).position ( 0 );
         }
 
         /**
@@ -548,6 +568,59 @@ public class RecordFBOActivity extends Activity implements SurfaceHolder.Callbac
         private void surfaceCreated() {
             Surface surface = mSurfaceHolder.getSurface();
             prepareGl(surface);
+
+            // Load shaders from 'assets' and get a linked program object
+            mProgramObject = ESShader.loadProgramFromAsset ( mContext,
+                    "shaders/vertexShader.vert",
+                    "shaders/fragmentShader.frag" );
+
+            // Get the sampler locations
+            mBaseMapLoc = GLES30.glGetUniformLocation ( mProgramObject, "s_baseMap" );
+            mLightMapLoc = GLES30.glGetUniformLocation ( mProgramObject, "s_lightMap" );
+            mFrameidLoc = GLES30.glGetUniformLocation ( mProgramObject, "u_frameid" );
+            mEffectidLoc = GLES30.glGetUniformLocation ( mProgramObject, "u_effectid" );
+
+            // Load the texture images from 'assets'
+            mBaseMapTexId = loadTextureFromAsset ( "textures/basemap.png" );
+            mLightMapTexId = loadTextureFromAsset ( "textures/android.jpg" );
+        }
+
+        ///
+        //  Load texture from asset
+        //
+        private int loadTextureFromAsset ( String fileName )
+        {
+            int[] textureId = new int[1];
+            Bitmap bitmap = null;
+            InputStream is = null;
+
+            try
+            {
+                is = mContext.getAssets().open ( fileName );
+            }
+            catch ( IOException ioe )
+            {
+                is = null;
+            }
+
+            if ( is == null )
+            {
+                return 0;
+            }
+
+            bitmap = BitmapFactory.decodeStream ( is );
+
+            GLES30.glGenTextures ( 1, textureId, 0 );
+            GLES30.glBindTexture ( GLES30.GL_TEXTURE_2D, textureId[0] );
+
+            GLUtils.texImage2D ( GLES30.GL_TEXTURE_2D, 0, bitmap, 0 );
+
+            GLES30.glTexParameteri ( GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR );
+            GLES30.glTexParameteri ( GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR );
+            GLES30.glTexParameteri ( GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE );
+            GLES30.glTexParameteri ( GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE );
+
+            return textureId[0];
         }
 
         /**
@@ -1073,40 +1146,143 @@ public class RecordFBOActivity extends Activity implements SurfaceHolder.Callbac
         private void draw() {
             GlUtil.checkGlError("draw start");
 
-            // Clear to a non-black color to make the content easily differentiable from
-            // the pillar-/letter-boxing.
-            GLES20.glClearColor(0.2f, 0.2f, 0.2f, 1.0f);
-            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
-
-            mTri.draw(mProgram, mDisplayProjectionMatrix);
-            mRect.draw(mProgram, mDisplayProjectionMatrix);
-            for (int i = 0; i < 4; i++) {
-                if (false && mPreviousWasDropped) {
-                    mEdges[i].setColor(1.0f, 0.0f, 0.0f);
-                } else {
-                    mEdges[i].setColor(0.5f, 0.5f, 0.5f);
-                }
-                mEdges[i].draw(mProgram, mDisplayProjectionMatrix);
+            if (mStartTime < 0) {
+                mStartTime = System.currentTimeMillis();
             }
+            double elapsedSeconds = (System.currentTimeMillis() - mStartTime) / 1000.0;
 
-            // Give a visual indication of the recording method.
-            switch (mRecordMethod) {
-                case RECMETHOD_DRAW_TWICE:
-                    mRecordRect.setColor(1.0f, 0.0f, 0.0f);
+            // Clear the color buffer
+            GLES30.glClear ( GLES30.GL_COLOR_BUFFER_BIT );
+
+            // Use the program object
+            GLES30.glUseProgram ( mProgramObject );
+
+            // Load the vertex position
+            mVertices.position ( 0 );
+            GLES30.glVertexAttribPointer ( 0, 3, GLES30.GL_FLOAT,
+                    false,
+                    5 * 4, mVertices );
+            // Load the texture coordinate
+            mVertices.position ( 3 );
+            GLES30.glVertexAttribPointer ( 1, 2, GLES30.GL_FLOAT,
+                    false,
+                    5 * 4,
+                    mVertices );
+
+            GLES30.glEnableVertexAttribArray ( 0 );
+            GLES30.glEnableVertexAttribArray ( 1 );
+
+
+            // Bind the base map
+            GLES30.glActiveTexture ( GLES30.GL_TEXTURE0 );
+            GLES30.glBindTexture ( GLES30.GL_TEXTURE_2D, mBaseMapTexId );
+
+            // Set the base map sampler to texture unit to 0
+            GLES30.glUniform1i ( mBaseMapLoc, 0 );
+
+            // Bind the light map
+            GLES30.glActiveTexture ( GLES30.GL_TEXTURE1 );
+            GLES30.glBindTexture ( GLES30.GL_TEXTURE_2D, mLightMapTexId );
+
+            // Set the light map sampler to texture unit 1
+            GLES30.glUniform1i ( mLightMapLoc, 1 );
+
+            int effectid = (int)(elapsedSeconds / mEffectTimePer);
+            float effectTime = (float) (elapsedSeconds - effectid * mEffectTimePer);
+            dealEffect(effectid, effectTime);
+
+            GLES30.glDrawElements ( GLES30.GL_TRIANGLES, 6, GLES30.GL_UNSIGNED_SHORT, mIndices );
+            if (elapsedSeconds > mEfffectTimeSum) {
+                mStartTime = -1;
+            }
+            GlUtil.checkGlError("draw done");
+        }
+
+
+        public void dealEffect(int effectid, float effectTime) {
+            GLES30.glUniform1i ( mEffectidLoc, effectid );
+            switch (effectid) {
+                case EFFECT_SLOPLINE:
+                    dealSlopEffect(effectTime);
                     break;
-                case RECMETHOD_FBO:
-                    mRecordRect.setColor(0.0f, 1.0f, 0.0f);
+                case EFFECT_SPLITLINE:
+                    dealSplitEffect(effectTime);
                     break;
-                case RECMETHOD_BLIT_FRAMEBUFFER:
-                    mRecordRect.setColor(0.0f, 0.0f, 1.0f);
+                case EFFECT_INCRESSLINE:
+                    dealIncreaseEffect(effectTime);
+                    break;
+                case EFFECT_INCRESSLINE_V:
+                    dealIncreaseEffectV(effectTime);
                     break;
                 default:
             }
-            mRecordRect.draw(mProgram, mDisplayProjectionMatrix);
-
-            GlUtil.checkGlError("draw done");
         }
+
+        public void dealSlopEffect(float effectTime) {
+            GLES30.glUniform1f ( mFrameidLoc, 2.f - effectTime / mEffectTimePer * 2.f);
+        }
+
+        public void dealSplitEffect(float effectTime) {
+            GLES30.glUniform1f ( mFrameidLoc, effectTime / mEffectTimePer * 0.5f);
+        }
+
+        public void dealIncreaseEffect(float effectTime) {
+            GLES30.glUniform1f ( mFrameidLoc, effectTime / mEffectTimePer);
+        }
+
+        public void dealIncreaseEffectV(float effectTime) {
+            GLES30.glUniform1f ( mFrameidLoc, 0.7f - effectTime / mEffectTimePer);
+        }
+
+
+        private final int EFFECT_SLOPLINE = 0;
+        private final int EFFECT_SPLITLINE = 1;
+        private final int EFFECT_INCRESSLINE = 2;
+        private final int EFFECT_INCRESSLINE_V = 3;
+
+        private float mEffectTimePer = 1.5f;
+        private int mEffectTimeNum = 4;
+        private float mEfffectTimeSum = mEffectTimeNum * mEffectTimePer;
+        private long mStartTime = -1;
+        // Handle to a program object
+        private int mProgramObject;
+
+        // Sampler location
+        private int mBaseMapLoc;
+        private int mLightMapLoc;
+        private int mFrameidLoc;
+        private int mEffectidLoc;
+
+        // Texture handle
+        private int mBaseMapTexId;
+        private int mLightMapTexId;
+
+        // Additional member variables
+        private int mWidth;
+        private int mHeight;
+        private FloatBuffer mVertices;
+        private ShortBuffer mIndices;
+        private Context mContext;
+
+        private final float[] mVerticesData =
+                {
+                        -1.0f,  1.0f, 0.0f, // Position 0
+                        0.0f,  0.0f,       // TexCoord 0
+                        -1.0f, -1.0f, 0.0f, // Position 1
+                        0.0f,  1.0f,       // TexCoord 1
+                        1.0f, -1.0f, 0.0f, // Position 2
+                        1.0f,  1.0f,       // TexCoord 2
+                        1.0f,  1.0f, 0.0f, // Position 3
+                        1.0f,  0.0f        // TexCoord 3
+                };
+
+        private final short[] mIndicesData =
+                {
+                        0, 1, 2, 0, 2, 3
+                };
     }
+
+
 
     /**
      * Handler for RenderThread.  Used for messages sent from the UI thread to the render thread.
